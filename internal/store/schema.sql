@@ -152,3 +152,20 @@ CREATE TABLE IF NOT EXISTS schedule (
     enabled     BOOLEAN NOT NULL DEFAULT true
 );
 CREATE INDEX IF NOT EXISTS idx_schedule_due ON schedule (enabled, next_run_at);
+
+-- Live-tail seam (PRD §14, ADR-23): every message insert emits pg_notify on the
+-- SSE channel from within the inserting transaction, so the live monitor's tail
+-- can never diverge from the durable row. The sse.Handler LISTENs on this exact
+-- channel ('yuno_messages'); the trigger means orchestrator hand-offs, the REST
+-- API, Telegram, and the scheduler all stream live with no per-caller wiring.
+CREATE OR REPLACE FUNCTION yuno_notify_message() RETURNS trigger AS $$
+BEGIN
+    PERFORM pg_notify('yuno_messages', NEW.id::text);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS message_notify ON message;
+CREATE TRIGGER message_notify
+    AFTER INSERT ON message
+    FOR EACH ROW EXECUTE FUNCTION yuno_notify_message();

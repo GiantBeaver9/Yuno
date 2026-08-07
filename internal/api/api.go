@@ -1,8 +1,7 @@
-// Package api holds the shared HTTP scaffold: the router entry point, JSON
-// helpers, and a request logger. Ported from the pi-server stdlib net/http
-// scaffold (Go 1.22 method-pattern ServeMux). Feature routes are registered by
-// their own packages and wired in cmd/yuno; this package owns only the shared
-// plumbing and the always-on health check.
+// Package api holds the HTTP layer: the App composition root (app.go) that
+// registers every REST route + the SSE stream, plus the shared JSON helpers and
+// a request logger. Ported from the pi-server stdlib net/http scaffold (Go 1.22
+// method-pattern ServeMux).
 package api
 
 import (
@@ -11,25 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"time"
-
-	"github.com/giantbeaver9/yuno/internal/store"
 )
-
-// Server carries shared dependencies for the base handlers.
-type Server struct {
-	Store *store.Store
-}
-
-// Register wires the base /api routes onto mux. Feature packages register their
-// own routes separately (wired in cmd/yuno).
-func Register(mux *http.ServeMux, st *store.Store) {
-	s := &Server{Store: st}
-	mux.HandleFunc("GET /api/health", s.health)
-}
-
-func (s *Server) health(w http.ResponseWriter, r *http.Request) {
-	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
 
 // Logging is a lightweight request logger wrapping the whole mux.
 func Logging(next http.Handler) http.Handler {
