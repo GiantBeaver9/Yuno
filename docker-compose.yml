@@ -1,0 +1,42 @@
+# One-command local platform (PRD §2): `docker compose up` stands up Postgres +
+# the Yuno backend (React SPA embedded). The model stays a remote API the user
+# keys — "local" means the platform runs on your box, not the model.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: yuno
+      POSTGRES_PASSWORD: yuno
+      POSTGRES_DB: yuno
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yuno"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: "8080"
+      DATABASE_URL: "postgres://yuno:yuno@postgres:5432/yuno?sslmode=disable"
+      SECRET_KEY: "${SECRET_KEY:-0000000000000000000000000000000000000000000000000000000000000000}"
+      GOOSE_PATH: "goose"
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
+      TELEGRAM_ALLOWED_CHAT_IDS: "${TELEGRAM_ALLOWED_CHAT_IDS:-}"
+    ports:
+      - "8080:8080"
+    volumes:
+      - workspaces:/app/workspaces
+      - agents:/app/agents
+
+volumes:
+  pgdata:
+  workspaces:
+  agents:

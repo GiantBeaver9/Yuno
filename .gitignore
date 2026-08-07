@@ -1,0 +1,9 @@
+/bin/
+/workspaces/
+/agents/
+*.env
+.env
+node_modules/
+/frontend/node_modules/
+# Keep the embed placeholder but ignore real vite build output overlays.
+/web/dist/assets/
