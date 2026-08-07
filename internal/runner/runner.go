@@ -6,13 +6,62 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 )
 
+// stderrTail returns the last ~600 chars of goose's stderr, trimmed, for error
+// context without flooding logs.
+func stderrTail(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) > 600 {
+		s = "…" + s[len(s)-600:]
+	}
+	return s
+}
+
 // ErrNoDecision is returned by ParseDecision when stdout carries no valid verdict.
 var ErrNoDecision = errors.New("runner: no DECISION line in output")
+
+// VerdictInstructions is the contract every agent must honour so the orchestrator
+// can route: end the final message with a DECISION (and optional SUMMARY) line.
+// Recipes embed this in their instructions; the no-recipe path injects it via
+// --system.
+const VerdictInstructions = "When you have finished this turn, end your final " +
+	"message with exactly these lines:\nDECISION: <approve|reject|complete>\n" +
+	"SUMMARY: <one short sentence>"
+
+// GooseProviderName maps a Yuno provider to goose's provider identifier (used in
+// a recipe's settings.goose_provider).
+func GooseProviderName(provider string) string {
+	switch strings.ToLower(provider) {
+	case "gemini", "google":
+		return "google"
+	case "huggingface", "hf":
+		return "huggingface"
+	default:
+		return strings.ToLower(provider)
+	}
+}
+
+// ProviderKeyEnv maps a Yuno provider + plaintext key to the environment variable
+// goose reads for that provider. Returns nil for an unknown provider or empty key.
+func ProviderKeyEnv(provider, key string) []string {
+	if key == "" {
+		return nil
+	}
+	switch strings.ToLower(provider) {
+	case "gemini", "google":
+		return []string{"GOOGLE_API_KEY=" + key}
+	case "huggingface", "hf":
+		return []string{"HF_TOKEN=" + key}
+	default:
+		return nil
+	}
+}
 
 // TurnRequest is one agent turn (§7). The caller (orchestrator) assembles it.
 type TurnRequest struct {
@@ -56,22 +105,39 @@ func (g *GooseRunner) Run(ctx context.Context, req TurnRequest) (TurnResult, err
 		goosePath = "goose"
 	}
 
+	// Headless, disposable turn: no session file. We deliberately do NOT pass
+	// --quiet — goose's diagnostics (provider/tool/auth errors) then reach
+	// stdout/stderr where operators can see them; ParseDecision scans the whole
+	// output for the trailing DECISION line regardless of the surrounding chatter.
 	args := []string{
 		"run",
+		"--no-session",
 		"--max-turns", strconv.Itoa(req.MaxTurns),
-		"--text", req.Input,
 	}
 	if req.RecipePath != "" {
-		args = append(args, "--recipe", req.RecipePath)
-	}
-	if req.Model != "" {
-		args = append(args, "--model", req.Model)
+		// A recipe carries the agent's instructions, provider and model; the
+		// per-turn input is passed as the `task` parameter (goose forbids
+		// --text alongside --recipe). See factory.buildRecipe.
+		args = append(args, "--recipe", req.RecipePath, "--params", "task="+req.Input)
+	} else {
+		// No recipe: drive goose directly with the input and the agent's prompt
+		// (plus the verdict contract) as system instructions. Provider/model/key
+		// come from the inherited goose environment (GOOSE_PROVIDER/GOOSE_MODEL/…).
+		system := req.Prompt
+		if system != "" {
+			system += "\n\n"
+		}
+		system += VerdictInstructions
+		args = append(args, "--text", req.Input, "--system", system)
 	}
 
 	cmd := exec.CommandContext(ctx, goosePath, args...)
 	cmd.Dir = req.WorkDir
-	cmd.Env = append(cmd.Env, "GOOSE_MODE=auto")
-	cmd.Env = append(cmd.Env, req.Env...)
+	// Inherit the process environment (goose needs HOME/PATH for its config and
+	// tools), then layer goose settings + the per-agent provider key.
+	env := append(os.Environ(), "GOOSE_MODE=auto", "GOOSE_DISABLE_KEYRING=true")
+	env = append(env, req.Env...)
+	cmd.Env = env
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -86,10 +152,16 @@ func (g *GooseRunner) Run(ctx context.Context, req TurnRequest) (TurnResult, err
 		Output:   stdout.String(),
 	}
 
+	// Surface goose's stderr on failure — that's where provider/tool/auth errors
+	// land — so operators can see WHY a turn failed (goose diagnostics go to
+	// stderr; --quiet keeps stdout to the model response only).
 	if runErr != nil {
-		return result, runErr
+		return result, fmt.Errorf("goose run failed: %w; stderr: %s", runErr, stderrTail(stderr.String()))
 	}
 	if parseErr != nil {
+		if s := stderrTail(stderr.String()); s != "" {
+			return result, fmt.Errorf("%w; goose stderr: %s", parseErr, s)
+		}
 		return result, parseErr
 	}
 	return result, nil

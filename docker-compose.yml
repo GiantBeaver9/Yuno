@@ -28,6 +28,14 @@ services:
       DATABASE_URL: "postgres://yuno:yuno@postgres:5432/yuno?sslmode=disable"
       SECRET_KEY: "${SECRET_KEY:-0000000000000000000000000000000000000000000000000000000000000000}"
       GOOSE_PATH: "goose"
+      MCP_BIN_DIR: "/app/bin"
+      AGENTS_DIR: "/app/agents"
+      # Platform-wide goose provider (used by agents that don't carry their own
+      # recipe/key). Per-agent BYO keys entered in the UI override these.
+      GOOSE_PROVIDER: "${GOOSE_PROVIDER:-}"
+      GOOSE_MODEL: "${GOOSE_MODEL:-}"
+      GOOGLE_API_KEY: "${GOOGLE_API_KEY:-}"
+      HF_TOKEN: "${HF_TOKEN:-}"
       TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
       TELEGRAM_ALLOWED_CHAT_IDS: "${TELEGRAM_ALLOWED_CHAT_IDS:-}"
     ports:

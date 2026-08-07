@@ -65,6 +65,7 @@ func main() {
 	ag := agents.New(st.Pool, box)
 	wf := workflow.New(st.Pool)
 	fac := factory.New(ag, cfg.AgentsDir, box)
+	fac.MCPBinDir = cfg.MCPBinDir // wire custom MCP servers into generated recipes
 
 	// Seed the workflow templates + their agents (idempotent).
 	if err := seed.Seed(ctx, ag, wf); err != nil {

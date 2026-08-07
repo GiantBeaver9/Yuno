@@ -96,25 +96,37 @@ self-contained server.
 
 ### Running real agents (Goose)
 
-Agent turns shell out to **Goose** (`goose run`, headless). To run real agents:
+Agent turns shell out to **Goose** (`goose run`, headless). The Docker image
+installs the Goose CLI and builds the MCP servers, so `docker compose up` is
+goose-ready. To point it at a model:
 
-1. Install Goose in the runtime and point `GOOSE_PATH` at it.
-2. Give each agent a provider + model + BYO key (via the UI form or the Factory
-   MCP tool) — the key is encrypted at rest and decrypted only at turn time.
-3. The custom MCP servers (`make mcp` builds `bin/yuno-memory` and
-   `bin/yuno-create-agent`) are registered in the agents' Goose recipes as
-   stdio extensions.
+1. **Set a provider key.** Either give each agent a provider + model + BYO key in
+   the Factory form (encrypted at rest, decrypted only at turn time and injected
+   as the right env var), or set a platform-wide default in `.env`:
+   - Gemini → `GOOSE_PROVIDER=google`, `GOOSE_MODEL=gemini-2.0-flash`, `GOOGLE_API_KEY=…`
+   - Hugging Face → `GOOSE_PROVIDER=huggingface`, `GOOSE_MODEL=…`, `HF_TOKEN=…`
+2. **Recipes are generated for you.** When the Factory creates an agent it writes
+   a valid Goose recipe (`AGENTS_DIR`): the agent's prompt + the verdict contract
+   as instructions, `settings.goose_provider/goose_model`, the built-in
+   `developer` extension (real shell/file/tests), and — for any agent whose tools
+   include `memory` or `create_agent` — the matching custom MCP server (from
+   `MCP_BIN_DIR`) wired in as a stdio extension. The per-turn input arrives as the
+   recipe's `task` parameter.
 
-Without Goose installed the orchestrator still runs, but a turn that can't invoke
-the runtime is retried under its lease rather than completing — the loop is
-self-limiting, not a hot spin. The orchestration itself (routing, atomic ack,
-loop guard, the 2-agent hand-off) is proven by the test suite via a fake runner,
-and can be demoed live with a tiny stub that emits the verdict contract:
+Running without a key still exercises the whole path — REST → bus → orchestrator →
+`goose run` (recipe + MCP extensions load) — and stops at the provider auth
+boundary; a turn that can't reach the model is retried under its lease, not hot-
+spun. The verdict contract every agent must emit:
 
 ```
 DECISION: <approve|reject|complete>
 SUMMARY: <short text>
 ```
+
+The orchestration itself (routing, atomic ack, loop guard, the 2-agent hand-off)
+is proven by the test suite via a fake runner and demoable with a stub that emits
+the two lines above. Goose diagnostics (provider/tool errors) are surfaced in the
+server log on a failed turn.
 
 ---
 

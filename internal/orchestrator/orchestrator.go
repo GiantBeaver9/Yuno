@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -125,6 +126,15 @@ func (o *Orchestrator) Step(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	// Inject the agent's BYO provider key as the env var goose expects, decrypted
+	// only here at turn time (never logged). Best-effort: an agent with no stored
+	// key falls back to the platform's inherited goose environment.
+	var turnEnv []string
+	if agent.Provider != "" {
+		if key, kerr := o.Agents.GetProviderKey(ctx, agentID, agent.Provider); kerr == nil {
+			turnEnv = runner.ProviderKeyEnv(agent.Provider, key)
+		}
+	}
 	res, err := o.Runner.Run(ctx, runner.TurnRequest{
 		Guid:       msg.RunID,
 		RecipePath: agent.RecipePath,
@@ -132,6 +142,7 @@ func (o *Orchestrator) Step(ctx context.Context) (bool, error) {
 		Prompt:     agent.Prompt,
 		Input:      msg.Content,
 		MaxTurns:   run.MaxIterations,
+		Env:        turnEnv,
 	})
 	if err != nil {
 		return false, fmt.Errorf("orchestrator: run turn: %w", err)
@@ -338,7 +349,10 @@ func (o *Orchestrator) Run(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			// Transient error on one message; back off and continue draining.
+			// Surface the failure (e.g. a goose/runtime or provider error) so
+			// operators can see it, then back off and continue draining. The
+			// message stays leased and is retried when the lease expires.
+			log.Printf("orchestrator: step error: %v", err)
 			processed = false
 		}
 		if !processed {

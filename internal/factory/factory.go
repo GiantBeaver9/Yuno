@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/giantbeaver9/yuno/internal/agents"
+	"github.com/giantbeaver9/yuno/internal/runner"
 	"github.com/giantbeaver9/yuno/internal/secretbox"
 )
 
@@ -109,6 +110,11 @@ type Factory struct {
 	agents    *agents.Store
 	agentsDir string
 	box       *secretbox.Box
+	// MCPBinDir is where the custom MCP server binaries (yuno-memory,
+	// yuno-create-agent) live. When set, an agent whose tools include "memory"
+	// or "create_agent" gets that server wired into its recipe as a stdio
+	// extension. Empty = builtin developer extension only.
+	MCPBinDir string
 }
 
 func New(ag *agents.Store, agentsDir string, box *secretbox.Box) *Factory {
@@ -136,7 +142,7 @@ func (f *Factory) CreateAgent(ctx context.Context, s Spec) (agents.Agent, error)
 		return agents.Agent{}, fmt.Errorf("factory: stat recipe path: %w", statErr)
 	}
 
-	if err := os.WriteFile(recipePath, buildRecipe(s), 0o644); err != nil {
+	if err := os.WriteFile(recipePath, f.buildRecipe(s), 0o644); err != nil {
 		return agents.Agent{}, fmt.Errorf("factory: write recipe file: %w", err)
 	}
 
@@ -170,19 +176,61 @@ func (f *Factory) CreateAgent(ctx context.Context, s Spec) (agents.Agent, error)
 
 // buildRecipe renders the agent's recipe file contents — the agent's "code":
 // its prompt, provider/model, tools, and guardrails, in a simple readable
-// key: value form.
-func buildRecipe(s Spec) []byte {
+// key: value form — a valid goose recipe (validated against `goose recipe
+// validate`). The per-turn input arrives as the `task` parameter (goose forbids
+// --text with --recipe); provider/model live in settings; the built-in developer
+// extension gives real shell/file/test execution, and any custom MCP tools the
+// agent enables are wired as stdio extensions when MCPBinDir is set.
+func (f *Factory) buildRecipe(s Spec) []byte {
+	instructions := s.Prompt
+	if instructions != "" {
+		instructions += "\n\n"
+	}
+	instructions += runner.VerdictInstructions
+
 	var b strings.Builder
-	fmt.Fprintf(&b, "name: %s\n", s.Name)
-	fmt.Fprintf(&b, "provider: %s\n", s.Provider)
-	fmt.Fprintf(&b, "model: %s\n", s.Model)
-	fmt.Fprintf(&b, "mode: %s\n", s.Mode)
-	fmt.Fprintf(&b, "prompt: %q\n", s.Prompt)
-	fmt.Fprintf(&b, "tools: %v\n", s.Tools)
-	fmt.Fprintf(&b, "blocked_tools: %v\n", s.BlockedTools)
-	fmt.Fprintf(&b, "roles: %v\n", s.Roles)
-	fmt.Fprintf(&b, "guid: %s\n", s.Guid)
-	fmt.Fprintf(&b, "max_cost: %v\n", s.MaxCost)
-	fmt.Fprintf(&b, "rate_limit: %v\n", s.RateLimit)
+	b.WriteString("version: 1.0.0\n")
+	fmt.Fprintf(&b, "title: %q\n", s.Name)
+	fmt.Fprintf(&b, "description: %q\n", "Yuno agent "+s.Name)
+	fmt.Fprintf(&b, "instructions: %q\n", instructions)
+	b.WriteString("parameters:\n")
+	b.WriteString("  - key: task\n")
+	b.WriteString("    input_type: string\n")
+	b.WriteString("    requirement: required\n")
+	fmt.Fprintf(&b, "    description: %q\n", "The task or message content for this turn.")
+	b.WriteString("prompt: \"{{ task }}\"\n")
+	b.WriteString("extensions:\n")
+	b.WriteString("  - type: builtin\n")
+	b.WriteString("    name: developer\n")
+	for _, tool := range s.Tools {
+		bin := f.mcpBinary(tool)
+		if bin == "" {
+			continue
+		}
+		fmt.Fprintf(&b, "  - type: stdio\n    name: %s\n    cmd: %q\n    args: []\n    timeout: 120\n", tool, bin)
+	}
+	if prov := runner.GooseProviderName(s.Provider); prov != "" {
+		b.WriteString("settings:\n")
+		fmt.Fprintf(&b, "  goose_provider: %q\n", prov)
+		if s.Model != "" {
+			fmt.Fprintf(&b, "  goose_model: %q\n", s.Model)
+		}
+	}
 	return []byte(b.String())
+}
+
+// mcpBinary returns the absolute path to the custom MCP server binary backing a
+// tool name, or "" if MCPBinDir is unset or the tool has no custom server.
+func (f *Factory) mcpBinary(tool string) string {
+	if f.MCPBinDir == "" {
+		return ""
+	}
+	switch tool {
+	case "memory":
+		return filepath.Join(f.MCPBinDir, "yuno-memory")
+	case "create_agent":
+		return filepath.Join(f.MCPBinDir, "yuno-create-agent")
+	default:
+		return ""
+	}
 }

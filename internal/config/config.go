@@ -25,6 +25,9 @@ type Config struct {
 	WorkspacesDir string
 	// AgentsDir is where the Factory writes agent recipe files.
 	AgentsDir string
+	// MCPBinDir is where the custom MCP server binaries (yuno-memory,
+	// yuno-create-agent) live, so the Factory can wire them into recipes.
+	MCPBinDir string
 	// TelegramBotToken enables the Telegram transport. Empty disables it.
 	TelegramBotToken string
 	// TelegramAllowedChatIDs whitelists chat ids. Empty = discovery mode.
@@ -44,6 +47,7 @@ func Load() Config {
 		GoosePath:              getenv("GOOSE_PATH", "goose"),
 		WorkspacesDir:          getenv("WORKSPACES_DIR", "./workspaces"),
 		AgentsDir:              getenv("AGENTS_DIR", "./agents"),
+		MCPBinDir:              getenv("MCP_BIN_DIR", "./bin"),
 		TelegramBotToken:       os.Getenv("TELEGRAM_BOT_TOKEN"),
 		TelegramAllowedChatIDs: parseChatIDs(os.Getenv("TELEGRAM_ALLOWED_CHAT_IDS")),
 		BuildMaxCost:           getenvFloat("BUILD_MAX_COST", 5.0),
