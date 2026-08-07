@@ -1,0 +1,122 @@
+[
+  {
+    "id": "secretbox",
+    "package": "internal/secretbox",
+    "files": ["internal/secretbox/*.go"],
+    "deps": [],
+    "tier": "simple",
+    "title": "AES-256-GCM encrypt/decrypt for provider keys & PAT at rest"
+  },
+  {
+    "id": "bus",
+    "package": "internal/bus",
+    "files": ["internal/bus/*.go"],
+    "deps": [],
+    "tier": "hard",
+    "title": "messages-table queue: lease claim, atomic ack, reclaim, per-run seq"
+  },
+  {
+    "id": "workflow",
+    "package": "internal/workflow",
+    "files": ["internal/workflow/*.go"],
+    "deps": [],
+    "tier": "standard",
+    "title": "workflow/node/edge CRUD + Route on decision + entry-node lookup"
+  },
+  {
+    "id": "runner",
+    "package": "internal/runner",
+    "files": ["internal/runner/*.go"],
+    "deps": [],
+    "tier": "standard",
+    "title": "Runner iface, GooseRunner (goose run headless), FakeRunner, decision/summary parse"
+  },
+  {
+    "id": "sse",
+    "package": "internal/sse",
+    "files": ["internal/sse/*.go"],
+    "deps": [],
+    "tier": "hard",
+    "title": "Publisher iface, LISTEN/NOTIFY tail, Last-Event-ID replay, per-client fan-out"
+  },
+  {
+    "id": "mcp-memory",
+    "package": "internal/memory",
+    "files": ["cmd/mcp-memory/main.go", "internal/memory/*.go"],
+    "deps": [],
+    "tier": "standard",
+    "title": "guid-scoped memory get/set/search over dict/stack + stdio MCP server"
+  },
+  {
+    "id": "agents",
+    "package": "internal/agents",
+    "files": ["internal/agents/*.go"],
+    "deps": ["secretbox"],
+    "tier": "standard",
+    "title": "CRUD over agent/agent_roles/provider_key with encrypted keys"
+  },
+  {
+    "id": "ghsync",
+    "package": "internal/ghsync",
+    "files": ["internal/ghsync/*.go"],
+    "deps": ["secretbox"],
+    "tier": "standard",
+    "title": "git ops per build, branch naming, PAT hygiene, PR body builder"
+  },
+  {
+    "id": "guardrails",
+    "package": "internal/guardrails",
+    "files": ["internal/guardrails/*.go"],
+    "deps": ["agents"],
+    "tier": "standard",
+    "title": "cost/rate/blocked-tool checks returning typed halt reasons"
+  },
+  {
+    "id": "factory",
+    "package": "internal/factory",
+    "files": ["internal/factory/*.go"],
+    "deps": ["agents", "secretbox"],
+    "tier": "standard",
+    "title": "CreateAgent: the one backend fn for UI form + Factory MCP tool"
+  },
+  {
+    "id": "telegram",
+    "package": "internal/telegram",
+    "files": ["internal/telegram/*.go"],
+    "deps": ["bus"],
+    "tier": "standard",
+    "title": "raw Bot API transport, UTF-16 splitter, allowlist, inbound->bus row"
+  },
+  {
+    "id": "schedule",
+    "package": "internal/schedule",
+    "files": ["internal/schedule/*.go"],
+    "deps": ["bus"],
+    "tier": "standard",
+    "title": "ticker: due-poll -> wake message from_ref system:schedule -> recompute next_run_at"
+  },
+  {
+    "id": "seed",
+    "package": "internal/seed",
+    "files": ["internal/seed/*.go"],
+    "deps": ["agents", "workflow"],
+    "tier": "simple",
+    "title": "count-guarded seed of 2 templates + coder/reviewer agents + reject edge"
+  },
+  {
+    "id": "orchestrator",
+    "package": "internal/orchestrator",
+    "files": ["internal/orchestrator/*.go"],
+    "deps": ["bus", "workflow", "runner", "agents"],
+    "tier": "hard",
+    "title": "worker loop: claim -> run -> route on decision -> atomic ack; loop guard"
+  },
+  {
+    "id": "mcp-create-agent",
+    "package": "cmd/mcp-create-agent",
+    "files": ["cmd/mcp-create-agent/main.go"],
+    "deps": ["factory"],
+    "tier": "simple",
+    "title": "thin stdio MCP server exposing create_agent -> factory.CreateAgent"
+  }
+]
