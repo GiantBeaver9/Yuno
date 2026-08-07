@@ -211,6 +211,14 @@ extensions its recipe enables (a real switch, not a fake dropdown).
 Build **bare-bones** for the demo; the README + live walkthrough sell the extensibility
 ceiling and prior work.
 
+**Implementation note (custom MCP servers).** Goose plays the host role LM Studio played in
+prior work — it spawns each MCP server as a stdio subprocess. Write `create_agent` (§10) and
+`memory` (§8) as small standalone Go binaries using **`github.com/mark3labs/mcp-go`** over
+`server.ServeStdio`. There's a complete, distilled skeleton (real v0.54.1 API, arg/result
+cheat sheet, Goose launch config, gotchas) in `salvage/mcp-skeleton/MCP-SKELETON.md` — copied
+from a working MCP server you already wrote. This was the only true net-new in the MCP layer;
+it's now fill-in-the-blanks.
+
 ---
 
 ## 10. Factory agent — the flex
