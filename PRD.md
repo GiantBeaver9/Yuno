@@ -6,6 +6,34 @@ The `salvage/*/PORT.md` files are deep-dives you consult per step; this PRD is t
 
 ---
 
+## ▶ KICKOFF — builder's standing order (read first, then GO)
+
+You are the builder. Your job is to turn this PRD into **compiled, runnable code**. Start now.
+
+- **Just start.** Begin at §18 step 0 (scaffold) and work the sequence in order. Do **not** ask
+  for approval on scaffolding, boilerplate, dependencies, or ordinary edits — you are
+  pre-authorized for all of it. Commit per step; push to your branch.
+- **Reuse first.** Before writing a subsystem, open the matching `salvage/*/PORT.md` and
+  LIFT/PORT what's marked reusable. Only the items flagged NET-NEW (§20) are written from
+  scratch.
+- **Compiles or it didn't happen.** After every step, `go build ./...` must pass. Green build
+  is the floor, not the goal. Write tests for the critical paths (agent creation, workflow
+  execution, message delivery) and keep them passing.
+- **Done = the demo runs.** `docker compose up` stands the platform up locally; a 2-agent
+  workflow executes a real task end-to-end (tools called, messages exchanged, conclusion
+  reached); a human can chat an agent via Telegram. That's the 40%. Build toward it; if time
+  is short, degrade gracefully (§20) but keep the end-to-end path real.
+- **Decisions are frozen (§3).** If reality contradicts the PRD, pick the most reasonable
+  option consistent with the house rules, leave a `// NOTE:` and keep moving. Only stop for a
+  human if you are truly blocked — do not stall on judgment calls.
+- **Mind the credit card.** Real model APIs cost money and a human is watching the meter.
+  Build and respect the guardrails (§15); never let a loop run unbounded; default to the
+  cheapest model that works and only escalate where the demo needs it.
+
+Everything below is the detail behind this order.
+
+---
+
 ## 0. How to use this doc (builder, read this first)
 
 - **Mission:** ship the platform in §1, demoable end-to-end, in ~2 days.
