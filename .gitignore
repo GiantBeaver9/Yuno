@@ -5,5 +5,5 @@
 .env
 node_modules/
 /frontend/node_modules/
-# Keep the embed placeholder but ignore real vite build output overlays.
-/web/dist/assets/
+# web/dist is committed (built React SPA) so `go build ./cmd/yuno` embeds a
+# working UI straight from a clone. Rebuild with `make frontend`.
