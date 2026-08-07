@@ -1,0 +1,27 @@
+# Install to /etc/systemd/system/pi-dashboard.service
+#   sudo cp deploy/pi-dashboard.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now pi-dashboard
+[Unit]
+Description=Pi Home Server Dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Adjust user/paths to your Pi. The binary is the single artifact built by
+# `make cross` and copied to the Pi (e.g. /usr/local/bin/pi-dashboard).
+User=pi
+ExecStart=/usr/local/bin/pi-dashboard
+# Config lives here: copy the repo's .env.example to /etc/pi-dashboard.env and
+# fill it in (PORT, APP_PASSWORD, LLM_BASE_URL, TELEGRAM_BOT_TOKEN, ...).
+EnvironmentFile=-/etc/pi-dashboard.env
+# StateDirectory gives the service /var/lib/pi-dashboard (owned by User=), so set
+# DB_PATH=/var/lib/pi-dashboard/data.db in /etc/pi-dashboard.env.
+StateDirectory=pi-dashboard
+# No inbound ports beyond PORT are needed: the Telegram bot uses outbound
+# long-polling, so the Pi never has to be reachable from the internet.
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
