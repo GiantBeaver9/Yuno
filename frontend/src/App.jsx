@@ -1,40 +1,66 @@
 import React, { useEffect, useState } from "react";
+import "./App.css";
+import { api } from "./api.js";
+import AgentsTab from "./components/AgentsTab.jsx";
+import WorkflowsTab from "./components/WorkflowsTab.jsx";
+import RunsTab from "./components/RunsTab.jsx";
+import MonitorTab from "./components/MonitorTab.jsx";
 
-// Minimal app shell. The graded screens — agents list, Factory "new agent"
-// form, and the live SSE monitor — mount here as their API contracts land.
+const TABS = [
+  { key: "agents", label: "Agents", render: () => <AgentsTab /> },
+  { key: "workflows", label: "Workflows", render: () => <WorkflowsTab /> },
+  { key: "runs", label: "Runs", render: () => <RunsTab /> },
+  { key: "monitor", label: "Live monitor", render: () => <MonitorTab /> },
+];
+
 export default function App() {
-  const [health, setHealth] = useState("checking…");
+  const [health, setHealth] = useState("checking");
+  const [active, setActive] = useState("agents");
 
   useEffect(() => {
-    fetch("/api/health")
-      .then((r) => r.json())
-      .then((d) => setHealth(d.status ?? "unknown"))
-      .catch(() => setHealth("unreachable"));
+    let cancelled = false;
+    function checkHealth() {
+      api
+        .health()
+        .then((d) => !cancelled && setHealth(d?.status || "unknown"))
+        .catch(() => !cancelled && setHealth("unreachable"));
+    }
+    checkHealth();
+    const t = setInterval(checkHealth, 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
   }, []);
 
-  return (
-    <main style={{ fontFamily: "system-ui, sans-serif", maxWidth: 820, margin: "3rem auto", padding: "0 1rem" }}>
-      <h1>Yuno</h1>
-      <p style={{ color: "#666" }}>
-        Agent orchestration platform — create agents, wire them into workflows, watch them run.
-      </p>
-      <p>
-        Backend health: <strong>{health}</strong>
-      </p>
-      <section style={{ marginTop: "2rem", display: "grid", gap: "1rem" }}>
-        <Placeholder title="Agents" desc="Per-agent provider, model, tools, guardrails, and roles." />
-        <Placeholder title="Factory" desc="Hand it a key + description; it brings a new agent online live." />
-        <Placeholder title="Live monitor" desc="SSE tail of the message bus — every turn, gap-free." />
-      </section>
-    </main>
-  );
-}
+  const healthDot = health === "ok" ? "ok" : health === "checking" ? "pending" : "bad";
 
-function Placeholder({ title, desc }) {
   return (
-    <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: "1rem" }}>
-      <h2 style={{ margin: "0 0 .25rem" }}>{title}</h2>
-      <p style={{ margin: 0, color: "#666" }}>{desc}</p>
+    <div className="app">
+      <header className="app-header">
+        <div>
+          <h1>Yuno</h1>
+          <p className="tagline">Agent orchestration — create agents, wire workflows, watch them run.</p>
+        </div>
+        <span className="health-badge">
+          <span className={`dot ${healthDot}`} />
+          backend: {health}
+        </span>
+      </header>
+
+      <nav className="tabs">
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            className={`tab-btn${active === t.key ? " active" : ""}`}
+            onClick={() => setActive(t.key)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </nav>
+
+      <main>{TABS.find((t) => t.key === active)?.render()}</main>
     </div>
   );
 }
