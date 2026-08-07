@@ -41,7 +41,9 @@ Everything below is the detail behind this order.
   repos, each with a `PORT.md` marking every piece **LIFT** (use ~as-is) / **PORT** (adapt) /
   **SUPERSEDED** / **SKIP**. There is **no source scaffold yet** — building it is step 0.
 - **Decisions are frozen.** §2–§17 are settled. Do **not** re-litigate them; implement them.
-  If reality forces a change, note it and keep moving — don't stall.
+  If reality forces a change, note it and keep moving — don't stall. The *why* behind each
+  call (and the alternative it beat) is in `DECISIONS.md` — read it if a choice looks odd
+  before overriding it.
 - **House rules are in §3.** Follow them; they're load-bearing, not decoration.
 - **Definition of done is §20.** Build toward the demo (40% of the grade), not feature count.
 
