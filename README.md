@@ -94,6 +94,57 @@ TEST_DATABASE_URL=postgres://yuno@127.0.0.1:5432/yuno?sslmode=disable make test
 The single binary embeds the built SPA, so `go build ./cmd/yuno` produces a
 self-contained server.
 
+### Running real agents (Goose)
+
+Agent turns shell out to **Goose** (`goose run`, headless). To run real agents:
+
+1. Install Goose in the runtime and point `GOOSE_PATH` at it.
+2. Give each agent a provider + model + BYO key (via the UI form or the Factory
+   MCP tool) — the key is encrypted at rest and decrypted only at turn time.
+3. The custom MCP servers (`make mcp` builds `bin/yuno-memory` and
+   `bin/yuno-create-agent`) are registered in the agents' Goose recipes as
+   stdio extensions.
+
+Without Goose installed the orchestrator still runs, but a turn that can't invoke
+the runtime is retried under its lease rather than completing — the loop is
+self-limiting, not a hot spin. The orchestration itself (routing, atomic ack,
+loop guard, the 2-agent hand-off) is proven by the test suite via a fake runner,
+and can be demoed live with a tiny stub that emits the verdict contract:
+
+```
+DECISION: <approve|reject|complete>
+SUMMARY: <short text>
+```
+
+---
+
+## Using it (REST API)
+
+Everything is a message on the bus; the REST API and SSE stream are the write and
+read sides of the same `message` rows.
+
+| Method & path | Purpose |
+|---|---|
+| `GET /api/health` | liveness |
+| `GET /api/agents` | list agents (+ roles, guid) |
+| `POST /api/agents` | create an agent — **the same backend the Factory MCP tool calls** (`{name,provider,model,key,prompt,tools,roles,mode,...}`; provider ∈ gemini\|huggingface) |
+| `GET /api/workflows` · `GET /api/workflows/{id}` | list templates · one workflow's nodes+edges |
+| `POST /api/runs` | start a run on a workflow (`{workflowId,input,maxIterations}`) → enqueues the entry message |
+| `GET /api/runs` · `GET /api/runs/{guid}/messages` | run status · the bus trail |
+| `POST /api/runs/{guid}/messages` | inject a human message (`{toAgentId,content}`) |
+| `POST /api/messages/{id}/approve` · `POST /api/runs/{guid}/resume` | clear an approval halt · lift a loop-guard halt (the one halt→resume mechanic) |
+| `GET /api/stream` | SSE live monitor (`Last-Event-ID` replay + live tail) |
+
+Quick demo (server on :8080, a Goose stub or real Goose configured):
+
+```bash
+curl -s localhost:8080/api/workflows                    # seeded: build-review, quick-review
+curl -s -X POST localhost:8080/api/runs \
+  -H 'content-type: application/json' \
+  -d '{"workflowId":1,"input":"Build a hello endpoint","maxIterations":6}'
+curl -s localhost:8080/api/runs/<guid>/messages         # watch coder -> reviewer -> done
+```
+
 ---
 
 ## Why these choices (short version)
