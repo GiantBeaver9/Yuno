@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/giantbeaver9/yuno/internal/agents"
-	"github.com/giantbeaver9/yuno/internal/seed"
 	"github.com/giantbeaver9/yuno/internal/secretbox"
+	"github.com/giantbeaver9/yuno/internal/seed"
 	"github.com/giantbeaver9/yuno/internal/store"
 	"github.com/giantbeaver9/yuno/internal/testutil"
 	"github.com/giantbeaver9/yuno/internal/workflow"

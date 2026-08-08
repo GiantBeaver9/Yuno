@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -135,9 +136,21 @@ func (o *Orchestrator) Step(ctx context.Context) (bool, error) {
 			turnEnv = runner.ProviderKeyEnv(agent.Provider, key)
 		}
 	}
+	// Materialize the recipe from the DB (source of truth) to a temp file for
+	// goose, so it survives ephemeral disk where the original recipe_path may be
+	// gone (e.g. after a Railway redeploy). Fall back to the on-disk path.
+	recipePath := agent.RecipePath
+	if agent.Recipe != "" {
+		if tmp, terr := writeTempRecipe(agent.Recipe); terr == nil {
+			recipePath = tmp
+			defer os.Remove(tmp)
+		} else {
+			log.Printf("orchestrator: temp recipe for agent %d: %v (falling back to %q)", agentID, terr, agent.RecipePath)
+		}
+	}
 	res, err := o.Runner.Run(ctx, runner.TurnRequest{
 		Guid:       msg.RunID,
-		RecipePath: agent.RecipePath,
+		RecipePath: recipePath,
 		Model:      agent.Model,
 		Prompt:     agent.Prompt,
 		Input:      msg.Content,
@@ -274,6 +287,25 @@ func (o *Orchestrator) loadRun(ctx context.Context, guid string) (runRow, error)
 		return runRow{}, fmt.Errorf("orchestrator: load run %q: %w", guid, err)
 	}
 	return r, nil
+}
+
+// writeTempRecipe writes a goose recipe body to a temp .yaml file and returns
+// its path. The caller removes it after the turn.
+func writeTempRecipe(body string) (string, error) {
+	f, err := os.CreateTemp("", "yuno-recipe-*.yaml")
+	if err != nil {
+		return "", err
+	}
+	if _, err := f.WriteString(body); err != nil {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
 }
 
 // resolveNode finds the node whose agent_id matches agentID.

@@ -15,6 +15,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -154,9 +155,9 @@ func startTelegram(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, w
 	bot := telegram.NewBot(client, bus.New(pool), cfg.TelegramAllowedChatIDs, entry.AgentID, guid)
 
 	go func() {
-		mode := "discovery mode (no allowlist)"
+		mode := "discovery mode (no allowlist — anyone can DM)"
 		if len(cfg.TelegramAllowedChatIDs) > 0 {
-			mode = "allowlist active"
+			mode = fmt.Sprintf("allowlist active (%d chat id(s))", len(cfg.TelegramAllowedChatIDs))
 		}
 		log.Printf("telegram bot polling (%s, bound run=%s agent=%d)", mode, guid, entry.AgentID)
 		for ctx.Err() == nil {
@@ -165,6 +166,89 @@ func startTelegram(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, w
 			}
 		}
 	}()
+
+	// Outbound responder: relay each agent turn on the bound run back to the most
+	// recent human chat, so the bot actually replies (the read side of the bus for
+	// Telegram). Keeps "everything is a message on the bus" symmetric.
+	go relayAgentActivity(ctx, pool, client, guid)
+}
+
+// relayAgentActivity forwards new agent messages on runGuid to the latest human
+// Telegram chat that participated in the run.
+func relayAgentActivity(ctx context.Context, pool *pgxpool.Pool, client *telegram.Client, runGuid string) {
+	var lastID int64
+	// Only relay activity produced from now on.
+	_ = pool.QueryRow(ctx, `SELECT COALESCE(MAX(id),0) FROM message WHERE run_id=$1`, runGuid).Scan(&lastID)
+
+	ticker := time.NewTicker(1500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		var chatRef string
+		if err := pool.QueryRow(ctx,
+			`SELECT from_ref FROM message WHERE run_id=$1 AND from_ref LIKE 'human:telegram:%' ORDER BY id DESC LIMIT 1`,
+			runGuid).Scan(&chatRef); err != nil {
+			continue // nobody has DM'd yet
+		}
+		chatID, ok := parseTelegramChat(chatRef)
+		if !ok {
+			continue
+		}
+
+		rows, err := pool.Query(ctx,
+			`SELECT id, decision, summary, content FROM message
+			 WHERE run_id=$1 AND id>$2 AND from_ref LIKE 'agent:%' ORDER BY id`, runGuid, lastID)
+		if err != nil {
+			continue
+		}
+		type item struct {
+			id                      int64
+			decision, summary, cont string
+		}
+		var batch []item
+		for rows.Next() {
+			var it item
+			if err := rows.Scan(&it.id, &it.decision, &it.summary, &it.cont); err == nil {
+				batch = append(batch, it)
+			}
+		}
+		rows.Close()
+
+		for _, it := range batch {
+			text := it.summary
+			if text == "" {
+				text = it.cont
+			}
+			if it.decision != "" {
+				text = "[" + it.decision + "] " + text
+			}
+			if text == "" {
+				text = "(no content)"
+			}
+			if err := client.SendMessage(ctx, chatID, "🤖 "+text); err != nil && ctx.Err() == nil {
+				log.Printf("telegram: relay send failed: %v", err)
+			}
+			lastID = it.id
+		}
+	}
+}
+
+// parseTelegramChat extracts the chat id from a "human:telegram:<chatid>" ref.
+func parseTelegramChat(ref string) (int64, bool) {
+	const prefix = "human:telegram:"
+	if len(ref) <= len(prefix) || ref[:len(prefix)] != prefix {
+		return 0, false
+	}
+	id, err := strconv.ParseInt(ref[len(prefix):], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return id, true
 }
 
 // newGuid returns a random 128-bit hex id for a run.

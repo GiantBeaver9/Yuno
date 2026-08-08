@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS agent (
     provider      TEXT NOT NULL DEFAULT '',
     model         TEXT NOT NULL DEFAULT '',
     recipe_path   TEXT NOT NULL DEFAULT '',
+    recipe        TEXT NOT NULL DEFAULT '',          -- goose recipe body (source of truth; disk is a cache)
     prompt        TEXT NOT NULL DEFAULT '',
     tools         TEXT[] NOT NULL DEFAULT '{}',
     mode          TEXT NOT NULL DEFAULT 'auto',      -- 'auto' | 'approval'
@@ -51,6 +52,8 @@ CREATE TABLE IF NOT EXISTS agent (
     guid          TEXT NOT NULL DEFAULT '',
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Idempotent add for databases created before the recipe column existed.
+ALTER TABLE agent ADD COLUMN IF NOT EXISTS recipe TEXT NOT NULL DEFAULT '';
 
 -- role via join; mutable, non-unique (ADR-9).
 CREATE TABLE IF NOT EXISTS agent_roles (

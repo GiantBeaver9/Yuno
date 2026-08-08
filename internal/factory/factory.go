@@ -142,7 +142,8 @@ func (f *Factory) CreateAgent(ctx context.Context, s Spec) (agents.Agent, error)
 		return agents.Agent{}, fmt.Errorf("factory: stat recipe path: %w", statErr)
 	}
 
-	if err := os.WriteFile(recipePath, f.buildRecipe(s), 0o644); err != nil {
+	recipe := f.buildRecipe(s)
+	if err := os.WriteFile(recipePath, recipe, 0o644); err != nil {
 		return agents.Agent{}, fmt.Errorf("factory: write recipe file: %w", err)
 	}
 
@@ -151,6 +152,7 @@ func (f *Factory) CreateAgent(ctx context.Context, s Spec) (agents.Agent, error)
 		Provider:     s.Provider,
 		Model:        s.Model,
 		RecipePath:   recipePath,
+		Recipe:       string(recipe), // DB copy — survives ephemeral disk (Railway)
 		Prompt:       s.Prompt,
 		Tools:        s.Tools,
 		Mode:         s.Mode,

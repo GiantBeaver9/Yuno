@@ -147,7 +147,7 @@ func (b *Bus) ReclaimExpired(ctx context.Context) (int64, error) {
 // AckParams is the atomic-ack bundle: mark the input done, enqueue output(s),
 // push a stack breadcrumb, upsert the dict payload — all in ONE transaction.
 type AckParams struct {
-	InputID       int64           // message.id to mark done (must still be 'processing')
+	InputID       int64 // message.id to mark done (must still be 'processing')
 	RunID         string
 	Outputs       []EnqueueParams // 0..n follow-on messages
 	StackSummary  string

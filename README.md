@@ -128,6 +128,33 @@ is proven by the test suite via a fake runner and demoable with a stub that emit
 the two lines above. Goose diagnostics (provider/tool errors) are surfaced in the
 server log on a failed turn.
 
+### Deploy to Railway
+
+Railway builds the `Dockerfile` on its own cloud (push to GitHub → auto-deploy,
+or `railway up` from local). `railway.json` sets the Dockerfile builder, a
+`/api/health` healthcheck, and an on-failure restart policy.
+
+1. Add a **Postgres** service → `DATABASE_URL` is injected automatically; the app
+   applies its schema on boot.
+2. Set service variables: `SECRET_KEY` (64 hex — `openssl rand -hex 32`),
+   `GOOSE_PROVIDER=google`, `GOOSE_MODEL=gemini-2.0-flash`, `GOOGLE_API_KEY=…`
+   (and `TELEGRAM_BOT_TOKEN` / `TELEGRAM_ALLOWED_CHAT_IDS` to enable the bot).
+3. `PORT` is injected by Railway and honoured automatically.
+
+**Ephemeral disk is handled:** agent recipes are stored in Postgres (the `agent.recipe`
+column is the source of truth) and materialized to a temp file per turn, so a
+redeploy that wipes the container filesystem does not break existing agents. The
+built SPA (`web/dist`) is committed, so the embed works regardless of the build.
+
+### Telegram
+
+Set `TELEGRAM_BOT_TOKEN` (from BotFather) to enable the transport. **Access
+control:** `TELEGRAM_ALLOWED_CHAT_IDS` is a comma-separated allowlist of chat IDs —
+**set it to your own ID so only you can drive the bot; leave it blank and anyone
+can** (discovery mode, fine for a quick demo). Inbound DMs become bus rows and
+drive the bound workflow; the bot relays each agent turn's verdict back to the
+chat, so you see `coder`/`reviewer` activity as replies.
+
 ---
 
 ## Using it (REST API)

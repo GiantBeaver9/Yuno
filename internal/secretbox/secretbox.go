@@ -56,7 +56,8 @@ func NewFromHex(hexKey string) (*Box, error) {
 
 // Encrypt seals plaintext with AES-256-GCM. A fresh random 12-byte nonce is
 // generated per call and PREPENDED to the returned ciphertext:
-//   out = nonce(12) || gcm.Seal(...)
+//
+//	out = nonce(12) || gcm.Seal(...)
 func (b *Box) Encrypt(plaintext []byte) ([]byte, error) {
 	// Create AES cipher block
 	block, err := aes.NewCipher(b.key[:])

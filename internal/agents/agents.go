@@ -20,7 +20,8 @@ type Agent struct {
 	Name         string
 	Provider     string
 	Model        string
-	RecipePath   string   // agent.recipe_path
+	RecipePath   string // agent.recipe_path (on-disk cache path)
+	Recipe       string // agent.recipe (goose recipe body; DB source of truth)
 	Prompt       string
 	Tools        []string // agent.tools  TEXT[]
 	Mode         string   // auto | approval
@@ -32,14 +33,14 @@ type Agent struct {
 }
 
 type CreateParams struct {
-	Name, Provider, Model, RecipePath, Prompt string
-	Tools        []string
-	Mode         string // defaults "auto" if empty
-	MaxCost      float64
-	RateLimit    int
-	BlockedTools []string
-	Guid         string
-	Roles        []string
+	Name, Provider, Model, RecipePath, Recipe, Prompt string
+	Tools                                             []string
+	Mode                                              string // defaults "auto" if empty
+	MaxCost                                           float64
+	RateLimit                                         int
+	BlockedTools                                      []string
+	Guid                                              string
+	Roles                                             []string
 }
 
 type Store struct {
@@ -55,7 +56,7 @@ func New(q store.Querier, box *secretbox.Box) *Store {
 // into a sorted array per agent via a LEFT JOIN, so an agent with no roles
 // still comes back with roles = '{}' rather than being dropped.
 const selectAgentJoinRoles = `
-SELECT a.id, a.name, a.provider, a.model, a.recipe_path, a.prompt, a.tools,
+SELECT a.id, a.name, a.provider, a.model, a.recipe_path, a.recipe, a.prompt, a.tools,
        a.mode, a.max_cost, a.rate_limit, a.blocked_tools, a.guid,
        COALESCE(array_agg(r.role ORDER BY r.role) FILTER (WHERE r.role IS NOT NULL), '{}')
 FROM agent a
@@ -65,7 +66,7 @@ LEFT JOIN agent_roles r ON r.agent_id = a.id
 // scanAgent reads one joined agent row produced by selectAgentJoinRoles.
 func scanAgent(sc interface{ Scan(...any) error }) (Agent, error) {
 	var a Agent
-	err := sc.Scan(&a.ID, &a.Name, &a.Provider, &a.Model, &a.RecipePath, &a.Prompt,
+	err := sc.Scan(&a.ID, &a.Name, &a.Provider, &a.Model, &a.RecipePath, &a.Recipe, &a.Prompt,
 		&a.Tools, &a.Mode, &a.MaxCost, &a.RateLimit, &a.BlockedTools, &a.Guid, &a.Roles)
 	return a, err
 }
@@ -102,10 +103,10 @@ func (s *Store) Create(ctx context.Context, p CreateParams) (Agent, error) {
 
 	var id int64
 	err := s.q.QueryRow(ctx,
-		`INSERT INTO agent (name, provider, model, recipe_path, prompt, tools, mode, max_cost, rate_limit, blocked_tools, guid)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		`INSERT INTO agent (name, provider, model, recipe_path, recipe, prompt, tools, mode, max_cost, rate_limit, blocked_tools, guid)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		 RETURNING id`,
-		p.Name, p.Provider, p.Model, p.RecipePath, p.Prompt, tools, mode, p.MaxCost, p.RateLimit, blockedTools, p.Guid,
+		p.Name, p.Provider, p.Model, p.RecipePath, p.Recipe, p.Prompt, tools, mode, p.MaxCost, p.RateLimit, blockedTools, p.Guid,
 	).Scan(&id)
 	if err != nil {
 		return Agent{}, fmt.Errorf("agents: create agent %q: %w", p.Name, err)
