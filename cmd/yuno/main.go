@@ -21,6 +21,8 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -126,10 +128,11 @@ func main() {
 	}
 }
 
-// startTelegram binds the bot's inbound messages to a run on the first seeded
-// template workflow, then long-polls in a goroutine. Best-effort: any setup
-// failure is logged and the rest of the platform runs normally. Inbound DMs
-// become bus rows (human:telegram:<chatid>) that the orchestrator drives.
+// startTelegram runs a single long-poll loop that dispatches each Telegram chat
+// to its OWN isolated run (run-per-chat), so multiple people can each hold a
+// separate agent conversation with the same bot. Only one poller may consume
+// getUpdates for a token, so this is the sole reader; it fans out per chat.
+// Best-effort: any setup failure is logged and the rest of the platform runs.
 func startTelegram(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, wf *workflow.Store) {
 	var wfID int64
 	if err := pool.QueryRow(ctx,
@@ -143,41 +146,92 @@ func startTelegram(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, w
 		return
 	}
 
-	guid := newGuid()
-	if _, err := pool.Exec(ctx,
-		`INSERT INTO run (guid, workflow_id, status, max_iterations) VALUES ($1, $2, 'running', 20)`,
-		guid, wfID); err != nil {
-		log.Printf("telegram: create bound run failed: %v — telegram disabled", err)
-		return
-	}
-
 	client := telegram.NewClient(cfg.TelegramBotToken, &http.Client{Timeout: 65 * time.Second})
-	bot := telegram.NewBot(client, bus.New(pool), cfg.TelegramAllowedChatIDs, entry.AgentID, guid)
+	runs := &chatRuns{pool: pool, client: client, wfID: wfID, entryAgentID: entry.AgentID, byChat: map[int64]string{}}
+
+	mode := "discovery mode (no allowlist — anyone can DM)"
+	if len(cfg.TelegramAllowedChatIDs) > 0 {
+		mode = fmt.Sprintf("allowlist active (%d chat id(s))", len(cfg.TelegramAllowedChatIDs))
+	}
+	log.Printf("telegram bot polling (%s, per-chat runs on workflow %d, entry agent %d)", mode, wfID, entry.AgentID)
 
 	go func() {
-		mode := "discovery mode (no allowlist — anyone can DM)"
-		if len(cfg.TelegramAllowedChatIDs) > 0 {
-			mode = fmt.Sprintf("allowlist active (%d chat id(s))", len(cfg.TelegramAllowedChatIDs))
-		}
-		log.Printf("telegram bot polling (%s, bound run=%s agent=%d)", mode, guid, entry.AgentID)
+		var offset int64
 		for ctx.Err() == nil {
-			if err := bot.Poll(ctx); err != nil && ctx.Err() == nil {
+			updates, err := client.GetUpdates(ctx, offset)
+			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
 				time.Sleep(2 * time.Second) // transient long-poll error; back off
+				continue
+			}
+			for _, u := range updates {
+				offset = u.UpdateID + 1
+				if !u.IsPrivate || strings.TrimSpace(u.Text) == "" {
+					continue // ignore groups/channels and empty/non-text updates
+				}
+				if !telegram.Allowed(u.ChatID, cfg.TelegramAllowedChatIDs) {
+					continue // not on the allowlist
+				}
+				guid, created := runs.ensure(ctx, u.ChatID)
+				if guid == "" {
+					continue
+				}
+				if created {
+					_ = client.SendMessage(ctx, u.ChatID, "👋 On it — spinning up your agents. Their replies land here.")
+				}
+				if _, err := bus.New(pool).Enqueue(ctx, bus.EnqueueParams{
+					RunID:   guid,
+					FromRef: "human:telegram:" + strconv.FormatInt(u.ChatID, 10),
+					ToRef:   "agent:" + strconv.FormatInt(runs.entryAgentID, 10),
+					Content: u.Text,
+				}); err != nil && ctx.Err() == nil {
+					log.Printf("telegram: enqueue inbound for chat %d failed: %v", u.ChatID, err)
+				}
 			}
 		}
 	}()
-
-	// Outbound responder: relay each agent turn on the bound run back to the most
-	// recent human chat, so the bot actually replies (the read side of the bus for
-	// Telegram). Keeps "everything is a message on the bus" symmetric.
-	go relayAgentActivity(ctx, pool, client, guid)
 }
 
-// relayAgentActivity forwards new agent messages on runGuid to the latest human
-// Telegram chat that participated in the run.
-func relayAgentActivity(ctx context.Context, pool *pgxpool.Pool, client *telegram.Client, runGuid string) {
+// chatRuns maps each Telegram chat to its own run so users get isolated agent
+// conversations. Only the single poll loop calls ensure, but the mutex keeps it
+// safe against future callers. Runs are in-memory per process (a restart starts
+// fresh runs); the runs and their trails persist in the DB.
+type chatRuns struct {
+	pool         *pgxpool.Pool
+	client       *telegram.Client
+	wfID         int64
+	entryAgentID int64
+
+	mu     sync.Mutex
+	byChat map[int64]string
+}
+
+// ensure returns the run guid for a chat, creating the run and its outbound
+// responder on first contact. created is true only on the creating call.
+func (c *chatRuns) ensure(ctx context.Context, chatID int64) (guid string, created bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if g, ok := c.byChat[chatID]; ok {
+		return g, false
+	}
+	g := newGuid()
+	if _, err := c.pool.Exec(ctx,
+		`INSERT INTO run (guid, workflow_id, status, max_iterations) VALUES ($1, $2, 'running', 20)`,
+		g, c.wfID); err != nil {
+		log.Printf("telegram: create run for chat %d failed: %v", chatID, err)
+		return "", false
+	}
+	c.byChat[chatID] = g
+	go relayAgentActivity(ctx, c.pool, c.client, g, chatID)
+	return g, true
+}
+
+// relayAgentActivity forwards new agent messages on runGuid to a specific chat —
+// the read side of the bus for one Telegram conversation.
+func relayAgentActivity(ctx context.Context, pool *pgxpool.Pool, client *telegram.Client, runGuid string, chatID int64) {
 	var lastID int64
-	// Only relay activity produced from now on.
 	_ = pool.QueryRow(ctx, `SELECT COALESCE(MAX(id),0) FROM message WHERE run_id=$1`, runGuid).Scan(&lastID)
 
 	ticker := time.NewTicker(1500 * time.Millisecond)
@@ -187,17 +241,6 @@ func relayAgentActivity(ctx context.Context, pool *pgxpool.Pool, client *telegra
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-		}
-
-		var chatRef string
-		if err := pool.QueryRow(ctx,
-			`SELECT from_ref FROM message WHERE run_id=$1 AND from_ref LIKE 'human:telegram:%' ORDER BY id DESC LIMIT 1`,
-			runGuid).Scan(&chatRef); err != nil {
-			continue // nobody has DM'd yet
-		}
-		chatID, ok := parseTelegramChat(chatRef)
-		if !ok {
-			continue
 		}
 
 		rows, err := pool.Query(ctx,
@@ -231,24 +274,11 @@ func relayAgentActivity(ctx context.Context, pool *pgxpool.Pool, client *telegra
 				text = "(no content)"
 			}
 			if err := client.SendMessage(ctx, chatID, "🤖 "+text); err != nil && ctx.Err() == nil {
-				log.Printf("telegram: relay send failed: %v", err)
+				log.Printf("telegram: relay send to chat %d failed: %v", chatID, err)
 			}
 			lastID = it.id
 		}
 	}
-}
-
-// parseTelegramChat extracts the chat id from a "human:telegram:<chatid>" ref.
-func parseTelegramChat(ref string) (int64, bool) {
-	const prefix = "human:telegram:"
-	if len(ref) <= len(prefix) || ref[:len(prefix)] != prefix {
-		return 0, false
-	}
-	id, err := strconv.ParseInt(ref[len(prefix):], 10, 64)
-	if err != nil {
-		return 0, false
-	}
-	return id, true
 }
 
 // newGuid returns a random 128-bit hex id for a run.

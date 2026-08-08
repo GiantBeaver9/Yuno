@@ -150,10 +150,13 @@ built SPA (`web/dist`) is committed, so the embed works regardless of the build.
 
 Set `TELEGRAM_BOT_TOKEN` (from BotFather) to enable the transport. **Access
 control:** `TELEGRAM_ALLOWED_CHAT_IDS` is a comma-separated allowlist of chat IDs —
-**set it to your own ID so only you can drive the bot; leave it blank and anyone
-can** (discovery mode, fine for a quick demo). Inbound DMs become bus rows and
-drive the bound workflow; the bot relays each agent turn's verdict back to the
-chat, so you see `coder`/`reviewer` activity as replies.
+set it to your own ID so only you can drive the bot; leave it blank and anyone
+can (discovery mode). **Run-per-chat isolation:** each chat gets its own run and
+its own agent conversation, so during a demo several people can each DM the bot
+and get separate, non-crossing threads. Inbound DMs become bus rows; the bot
+relays that chat's agent activity (`coder`/`reviewer` verdicts) back to that chat.
+(Runs are per-process — a restart starts fresh chat runs; the trails persist in
+the DB.)
 
 ---
 
